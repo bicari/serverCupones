@@ -2,18 +2,18 @@ import configparser
 import asyncio
 #import os
 
-async def lastAuto(name_caja):
+async def lastAuto(id_caja):
     global_var = configparser.ConfigParser()
     global_var.read('server.ini')
 
-    auto =  global_var.get('LASTAUTO', name_caja)
+    auto =  global_var.get('LASTAUTO', id_caja)
     return auto
 
-async def updateAuto(data, name_caja, section):
+async def updateAuto(data, id_caja, section):
     try:
         var = configparser.ConfigParser()
         var.read('server.ini')
-        var.set(section, name_caja, data)
+        var.set(section, id_caja, data)
 
         with open('server.ini', 'w') as configfile:
             var.write(configfile)

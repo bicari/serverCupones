@@ -4,7 +4,7 @@ import pathlib
 from datetime import datetime
 from read_ini import lastAuto, updateAuto
 
-async def query_operacion_detalle(serie, name: str):
+async def query_operacion_detalle(serie, name:str):
     with pyodbc.connect("DSN=A2GKC") as connection:
         cursor = connection.cursor()
         row=cursor.execute(f"""SELECT MAX(FTI_AUTOINCREMENT), FTI_SERIE
@@ -12,7 +12,7 @@ async def query_operacion_detalle(serie, name: str):
                                 WHERE FTI_STATUS = 1  AND FTI_TIPO = 11 AND FTI_SERIE = '{serie}' 
                                 AND FTI_FECHAEMISION = '{str(datetime.date(datetime.now()))}' 
                                 GROUP BY FTI_SERIE""").fetchone()
-        auto = await lastAuto(name)  
+        auto = await lastAuto(serie)  
         #print(auto, row)                               
         if row != None and row[0] > int(auto):
                 #print(row)
@@ -28,7 +28,7 @@ async def query_operacion_detalle(serie, name: str):
                                             FTI_TOTALNETO                  AS TOTALBS,
                                             CAST((FTI_TOTALNETO / FTI_FACTORREFERENCIA) AS MONEY)        AS TOTALUSD0, 
    ROUND(CAST((FTI_TOTALNETO / FTI_FACTORREFERENCIA) +  ((FTI_BASEIGTF * 0.03) / FTI_FACTORREFERENCIA) AS MONEY)) AS TOTALUSD1, 
-   CAST((FTI_TOTALNETO / FTI_FACTORREFERENCIA) + ((FTI_BASEIGTF * 0.03) / FTI_FACTORREFERENCIA) AS MONEY)         AS TOTALUSD2,
+   CAST((FTI_TOTALNETO / FTI_FACTORREFERENCIA) + ((FTI_BASEIGTF / 0.03) / FTI_FACTORREFERENCIA) AS MONEY)         AS TOTALUSD2,
    ROUND(CAST((FTI_TOTALBRUTO / FTI_FACTORREFERENCIA) AS MONEY))                                                  AS TOTALUSD3, 
    CAST((FTI_TOTALBRUTO / FTI_FACTORREFERENCIA) AS MONEY)                                                         AS TOTALUSD4,
     
@@ -47,7 +47,7 @@ async def query_operacion_detalle(serie, name: str):
                                     INTO "{pathlib.Path().absolute()}\\tmp\\SDetalleventa{name}"     
                                     FROM SDETALLEVENTA
                                     WHERE FDI_OPERACION_AUTOINCREMENT = {row[0]} """)
-                await updateAuto(str(row[0]), name.upper(), 'LASTAUTO')
+                await updateAuto(str(row[0]), serie.upper(), 'LASTAUTO')
                 return True
         else:
              return False

@@ -10,7 +10,6 @@ import logging
 from colorlog import ColoredFormatter
 from read_ini import getServerConfig
 import threading
-import time
 
 #logging.basicConfig(format='%(levelname)s:  %(message)s', datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
 console_handler = logging.StreamHandler()
@@ -22,18 +21,13 @@ logger.addHandler(console_handler)
 config = getServerConfig()
 sio = socketio.AsyncServer(async_mode='asgi',  logger=True)
 app = socketio.ASGIApp(sio)
-connected_clients = set()
 
 class Namespace1(socketio.AsyncNamespace):
-    
-    def __init__(self, namespace=None ):
-        
+
+    def __init__(self, namespace=None):
         super().__init__(namespace)
         self.name = namespace
         self.flag =  False
-        
-        
-        
         
     async def compress_file(self, name_file:str, path:str):
 
@@ -59,18 +53,18 @@ class Namespace1(socketio.AsyncNamespace):
 
     async def background_query_sales(self, name, serie): #Tarea en segundo plano:
         logger.setLevel(logging.INFO)
-        logger.info(f'Iniciando tarea en segundo plano usuario: {name}')
+        logger.info(f'Iniciando tarea en segundo plano usuario: {self.name}')
         
-        while self.flag and len(connected_clients) > 0:
-            row = await query_operacion_detalle(serie, name=name[1:])
+        while self.flag:
+            row = await query_operacion_detalle(serie, name=self.name[1:])
             #print(row)
             if row == True:
                 path_script = f"{os.path.dirname(__file__)}"
                 new_path = pathlib.PureWindowsPath(path_script)
-                compress = await self.compress_file(f'{pathlib.Path().absolute()}\\zip\\{name[1:]}.zip', f"{str(new_path)}\\tmp\\")
+                compress = await self.compress_file(f'{pathlib.Path().absolute()}\\zip\\{self.name[1:]}.zip', f"{str(new_path)}\\tmp\\")
                 if compress:
                     try:
-                        with open(f"{pathlib.Path().absolute()}\\zip\\{name[1:]}.zip", 'rb') as file:
+                        with open(f"{pathlib.Path().absolute()}\\zip\\{self.name[1:]}.zip", 'rb') as file:
                             bytes = file.read()
                             encoded = base64.b64encode(bytes)
                         await sio.emit('sync', {'message': encoded}, namespace=name)
@@ -78,38 +72,25 @@ class Namespace1(socketio.AsyncNamespace):
                         print(e)    
             now = datetime.now()
             formatted_time = now.strftime("%H:%M:%S")
-            logger.info(f'Usuario:{name} Sin cambios en base de datos :{formatted_time}')    
+            logger.info(f'Usuario:{self.name} Sin cambios en base de datos :{formatted_time}')    
             #compress =  compress_file(f'{env_var[5]}.zip', f"{pathlib.Path().absolute()}\\"
             
             await asyncio.sleep(5)
             
-    def run(self, flag):
-        while len(connected_clients) == 0 : 
-            self.flag = flag
-            time.sleep(3)
-            print(len(connected_clients))
-            if len(connected_clients) > 0:
-                asyncio.run(self.background_query_sales('/caja03', '1NF7002140'))
-                break
-
-
-    def stop(self, flag):
-        self.flag = flag  
-                  
+    def run(self):
+        asyncio.run(self.background_query_sales(self.headers_client_name, self.headers_client_serie))        
 
     async def on_connect(self, sid, environ):
-        #self.flag = True
+        self.flag = True
         logger.setLevel(logging.INFO)
         self.headers_client_name  = environ['asgi.scope']['headers'][1][1].decode('utf-8')
         self.headers_client_serie = environ['asgi.scope']['headers'][2][1].decode('utf-8')
-        connected_clients.add(self.headers_client_serie)
-        print(len(connected_clients))
         await sio.emit('welcome', {'message': 'aqui estoy cliente para ti'}, namespace=self.name)
         logger.info(f'User:{self.name} connected')
         #self.task = asyncio.create_task(self.background_query_sales(headers_client_name, headers_client_serie))#Iniciando tarea en segundo plano al conectarse un cliente
-        #self.stop_event = threading.Event()
-        #self.newThread = threading.Thread(target=self.run)
-        #self.newThread.start()        
+        self.stop_event = threading.Event()
+        self.newThread = threading.Thread(target=self.run)
+        self.newThread.start()        
     
 
     async def on_disconnect(self, sid):
@@ -117,7 +98,6 @@ class Namespace1(socketio.AsyncNamespace):
         logger.info(f'Usuario:{self.name} se ha desconectado')
         #var=self.task.cancel()
         self.flag = False
-        connected_clients.discard(self.headers_client_serie)
         logger.info('Tarea en segundo plano detenida')
         
 
@@ -131,14 +111,6 @@ sio.register_namespace(Namespace1('/caja06'))
 sio.register_namespace(Namespace1('/caja07'))
 sio.register_namespace(Namespace1('/caja08'))
 
-class ThreadQuery(Namespace1):
-    def __init__(self, namespace=None):
-        super().__init__(namespace)
-
-    def start_thread(self):
-        self.t = threading.Thread(target=self.run, args=[True])
-        self.t.start()    
-        
 
 if __name__ == '__main__':
     try:
@@ -150,13 +122,7 @@ if __name__ == '__main__':
         #config = uvicorn.Config(app, host=config[0] ,port=config[1],  workers=8)
         #server = uvicorn.Server(config)
         #server.run()
-        run = ThreadQuery()
-        run.start_thread()
-        uvicorn.run(app, host=config[0], port=int(config[1]))
-       
-        
-        
+        uvicorn.run(app, host=config[0], port=int(config[1]), workers=8)
     except KeyboardInterrupt as e:
         logger.warning("Cerrando Servidor http, se desconectaran todas las sesiones establecidas")
-        run.stop(flag=False)
         
