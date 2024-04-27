@@ -23,6 +23,7 @@ config = getServerConfig()
 sio = socketio.AsyncServer(async_mode='asgi',  logger=True)
 app = socketio.ASGIApp(sio)
 connected_clients = set()
+flag = False
 
 class Namespace1(socketio.AsyncNamespace):
     
@@ -30,7 +31,7 @@ class Namespace1(socketio.AsyncNamespace):
         
         super().__init__(namespace)
         self.name = namespace
-        self.flag =  False
+        #self.flag =  False
         
         
         
@@ -57,11 +58,12 @@ class Namespace1(socketio.AsyncNamespace):
             return None            
         
 
-    async def background_query_sales(self, name, serie): #Tarea en segundo plano:
+    async def background_query_sales(self, name, serie, flag2): #Tarea en segundo plano:
         logger.setLevel(logging.INFO)
         logger.info(f'Iniciando tarea en segundo plano usuario: {name}')
+        flag = flag2
         
-        while self.flag and len(connected_clients) > 0:
+        while flag and len(connected_clients) > 0:
             row = await query_operacion_detalle(serie, name=name[1:])
             #print(row)
             if row == True:
@@ -83,18 +85,18 @@ class Namespace1(socketio.AsyncNamespace):
             
             await asyncio.sleep(5)
             
-    def run(self, flag):
+    def run(self):
         while len(connected_clients) == 0 : 
-            self.flag = flag
+            flag = True
             time.sleep(3)
             print(len(connected_clients))
             if len(connected_clients) > 0:
-                asyncio.run(self.background_query_sales('/caja03', '1NF7002140'))
+                asyncio.run(self.background_query_sales('/caja03', '1NF7002140', flag))
                 break
 
 
-    def stop(self, flag):
-        self.flag = flag  
+    def stop(self, flag2):
+        flag = flag2  
                   
 
     async def on_connect(self, sid, environ):
@@ -102,23 +104,24 @@ class Namespace1(socketio.AsyncNamespace):
         logger.setLevel(logging.INFO)
         self.headers_client_name  = environ['asgi.scope']['headers'][1][1].decode('utf-8')
         self.headers_client_serie = environ['asgi.scope']['headers'][2][1].decode('utf-8')
-        connected_clients.add(self.headers_client_serie)
-        print(len(connected_clients))
         await sio.emit('welcome', {'message': 'aqui estoy cliente para ti'}, namespace=self.name)
-        logger.info(f'User:{self.name} connected')
+        connected_clients.add(self.headers_client_serie)
+        logger.info(f'User:{self.headers_client_serie} connected')
+        print(connected_clients)
+        
         #self.task = asyncio.create_task(self.background_query_sales(headers_client_name, headers_client_serie))#Iniciando tarea en segundo plano al conectarse un cliente
         #self.stop_event = threading.Event()
         #self.newThread = threading.Thread(target=self.run)
         #self.newThread.start()        
-    
+    async def reconnect(self, sid):
+        print('reconnect')
 
     async def on_disconnect(self, sid):
         logger.setLevel(logging.INFO)
         logger.info(f'Usuario:{self.name} se ha desconectado')
         #var=self.task.cancel()
-        self.flag = False
         connected_clients.discard(self.headers_client_serie)
-        logger.info('Tarea en segundo plano detenida')
+        logger.info(f'Clientes: {connected_clients}')
         
 
 
@@ -136,7 +139,7 @@ class ThreadQuery(Namespace1):
         super().__init__(namespace)
 
     def start_thread(self):
-        self.t = threading.Thread(target=self.run, args=[True])
+        self.t = threading.Thread(target=self.run)
         self.t.start()    
         
 
@@ -158,5 +161,5 @@ if __name__ == '__main__':
         
     except KeyboardInterrupt as e:
         logger.warning("Cerrando Servidor http, se desconectaran todas las sesiones establecidas")
-        run.stop(flag=False)
+        run.stop(flag2=False)
         
