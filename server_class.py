@@ -2,13 +2,11 @@ import socketio
 import asyncio
 from datetime import datetime
 import pathlib
-import base64
 import os
-from zipfile import *
-from querys_sql import query_operacion_detalle
+from querys_sql import query_operacion_detalle, search_soperacion_sedetalle
 import logging
 from colorlog import ColoredFormatter
-from read_ini import getServerConfig
+from read_ini import getServerConfig, lastAuto, getKeys
 import threading
 import time
 
@@ -24,6 +22,10 @@ sio = socketio.AsyncServer(async_mode='asgi',  logger=True)
 app = socketio.ASGIApp(sio)
 connected_clients = set()
 flag = False
+global operaciones
+global back_task 
+back_task = None
+operaciones = False
 
 class Namespace1(socketio.AsyncNamespace):
     
@@ -32,57 +34,49 @@ class Namespace1(socketio.AsyncNamespace):
         super().__init__(namespace)
         self.name = namespace
         #self.flag =  False
-        
-        
-        
-        
-    async def compress_file(self, name_file:str, path:str):
-
-        dirPathPattern = r'{}'.format(path)
-        print('por aqui')
-        result = next(os.walk(dirPathPattern))[2]
-        if len(result) > 0:
-          print(name_file)
-          with ZipFile(name_file, mode='w') as file_compress:
-            try:
-                for file in result:
-                    if file.endswith(('.idx', '.dat', '.blb')):
-                        os.chmod(dirPathPattern+file, 0o777)
-                        print(file[:13] + file[19:23])
-                        file_compress.write(f"{dirPathPattern+file}", arcname=file[:13] + file[19:23], compress_type=ZIP_DEFLATED)
-                   
-            except Exception as e:
-                print(e)
-            return True
-        else:
-            return None            
+         
         
 
     async def background_query_sales(self, name, serie, flag2): #Tarea en segundo plano:
+        global operaciones
         logger.setLevel(logging.INFO)
         logger.info(f'Iniciando tarea en segundo plano usuario: {name}')
         flag = flag2
         
         while flag and len(connected_clients) > 0:
-            row = await query_operacion_detalle(serie, name=name[1:])
-            #print(row)
-            if row == True:
-                path_script = f"{os.path.dirname(__file__)}"
-                new_path = pathlib.PureWindowsPath(path_script)
-                compress = await self.compress_file(f'{pathlib.Path().absolute()}\\zip\\{name[1:]}.zip', f"{str(new_path)}\\tmp\\")
-                if compress:
-                    try:
-                        with open(f"{pathlib.Path().absolute()}\\zip\\{name[1:]}.zip", 'rb') as file:
-                            bytes = file.read()
-                            encoded = base64.b64encode(bytes)
-                        await sio.emit('sync', {'message': encoded}, namespace=name)
-                    except Exception as e:
-                        print(e)    
+            tasks = []
+            tuple_series = tuple(connected_clients)
+            if len(tuple_series) == 1:
+                logger.info(f"""Series disponibles: {str(tuple_series).replace(',', '', 1)}""")
+                tuple_series=str(tuple_series).replace(',', '', 1)
+            else:    
+                logger.info(f"""Series disponibles: {(tuple_series)}""")
+            logger.info('Por aqui')
+            row = await query_operacion_detalle(tuple_series, name=name[1:])
+            last = await lastAuto()
+            logger.info(f'{row}')
+            logger.info(f'{last}')
+            if len(row) > 0:
+                logger.info('Dato encontrado')
+                for serie in row:
+                    for auto in last: 
+                        if serie[1] in connected_clients and serie[1] == auto[0].upper() and serie[0] > int(auto[1]):
+                            print(auto[1], serie[0], self.name)
+                            operaciones = asyncio.create_task(search_soperacion_sedetalle(autoincrement=serie[0], name=serie[1], serie=serie[1]))
+                            tasks.append(operaciones)
+                        else:
+                            logger.info('Nada que mostrar')
+                            continue
+            if len(tasks) > 0:         
+                results = await asyncio.gather(*tasks)
+                for result in results:
+                    print(result)
+                    await sio.emit('sync', {'message': result[2]}, namespace=f"/{result[1]}")
             now = datetime.now()
             formatted_time = now.strftime("%H:%M:%S")
-            logger.info(f'Usuario:{name} Sin cambios en base de datos :{formatted_time}')    
+            logger.info(f'Usuario:{name} Sin cambios en base de datos :{formatted_time}: {connected_clients}')    
             #compress =  compress_file(f'{env_var[5]}.zip', f"{pathlib.Path().absolute()}\\"
-            
+
             await asyncio.sleep(5)
             
     def run(self):
@@ -105,9 +99,14 @@ class Namespace1(socketio.AsyncNamespace):
         self.headers_client_name  = environ['asgi.scope']['headers'][1][1].decode('utf-8')
         self.headers_client_serie = environ['asgi.scope']['headers'][2][1].decode('utf-8')
         await sio.emit('welcome', {'message': 'aqui estoy cliente para ti'}, namespace=self.name)
-        connected_clients.add(self.headers_client_serie)
+        connected_clients.add(self.headers_client_serie.upper())
         logger.info(f'User:{self.headers_client_serie} connected')
         print(connected_clients)
+        global back_task
+        if back_task == None:
+            back_task = asyncio.create_task(self.background_query_sales(self.headers_client_name, self.headers_client_serie, True))
+        else:
+            logger.info('La tarea ya este en ejecucion')    
         
         #self.task = asyncio.create_task(self.background_query_sales(headers_client_name, headers_client_serie))#Iniciando tarea en segundo plano al conectarse un cliente
         #self.stop_event = threading.Event()
@@ -117,22 +116,23 @@ class Namespace1(socketio.AsyncNamespace):
         print('reconnect')
 
     async def on_disconnect(self, sid):
+        global back_task
         logger.setLevel(logging.INFO)
         logger.info(f'Usuario:{self.name} se ha desconectado')
         #var=self.task.cancel()
         connected_clients.discard(self.headers_client_serie)
         logger.info(f'Clientes: {connected_clients}')
+        if len(connected_clients) == 0: 
+            back_task.cancel()
+            back_task = None
+            logger.info('Tarea cancelada exitosamente')
         
 
 
-sio.register_namespace(Namespace1('/caja01'))
-sio.register_namespace(Namespace1('/caja02'))
-sio.register_namespace(Namespace1('/caja03'))
-sio.register_namespace(Namespace1('/caja04'))
-sio.register_namespace(Namespace1('/caja05'))
-sio.register_namespace(Namespace1('/caja06'))
-sio.register_namespace(Namespace1('/caja07'))
-sio.register_namespace(Namespace1('/caja08'))
+for serie in getKeys():#Obteniendo series disponibles de las cajas, y creando instancias de namespaces
+    if serie != None:
+        sio.register_namespace(Namespace1(f"/{serie.upper()}"))
+
 
 class ThreadQuery(Namespace1):
     def __init__(self, namespace=None):
@@ -153,13 +153,10 @@ if __name__ == '__main__':
         #config = uvicorn.Config(app, host=config[0] ,port=config[1],  workers=8)
         #server = uvicorn.Server(config)
         #server.run()
-        run = ThreadQuery()
-        run.start_thread()
-        uvicorn.run(app, host=config[0], port=int(config[1]))
-       
-        
-        
+        #run = ThreadQuery()
+        #run.start_thread()
+        uvicorn.run(app, host=config[0], port=int(config[1]))       
     except KeyboardInterrupt as e:
         logger.warning("Cerrando Servidor http, se desconectaran todas las sesiones establecidas")
-        run.stop(flag2=False)
+        #run.stop(flag2=False)
         

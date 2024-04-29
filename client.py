@@ -11,15 +11,15 @@ branc  = socketio.AsyncClient(logger=True)
 config =  getConfigClient()
 
 
-@branc.on('connect', namespace=f'/{config[2]}')
+@branc.on('connect', namespace=f'/{config[2].upper()}')
 async def connect():
     print('Estoy conectado')
 
-@branc.on('welcome', namespace=f'/{config[2]}')
+@branc.on('welcome', namespace=f'/{config[2].upper()}')
 async def recv(data):
     print(data)
 
-@branc.on('sync', namespace=f'/{config[2]}')
+@branc.on('sync', namespace=f'/{config[2].upper()}')
 async def my_event(data):
     #print('escuchando evento', data)
     decoded = data['message']
@@ -36,7 +36,7 @@ async def my_event(data):
 
 async def init_client():
     try:
-        await branc.connect(f'http://{config[0]}:{config[1]}', namespaces=f'/{config[2]}', headers={'name': f'/{config[2]}', 'serie': f'{config[3]}'}, transports=['polling', 'websocket'], wait=True, wait_timeout=5)
+        await branc.connect(f'http://{config[0]}:{config[1]}', namespaces=f'/{config[2].upper()}', headers={'name': f'/{config[2].upper()}', 'serie': f'{config[3].upper()}'}, transports=['polling', 'websocket'], wait=True, wait_timeout=5)
         await branc.wait()
     except Exception as e:
         print(e)    
