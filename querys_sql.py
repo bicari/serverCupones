@@ -16,7 +16,8 @@ async def query_operacion_detalle(serie, name:str):
                                 GROUP BY FTI_SERIE""").fetchall()
             #auto = await lastAuto(serie)
         except Exception as e:
-             print(e)
+             print(e)   
+             return []
         return row
 async def test():
      print('Simulando consulta')
@@ -25,8 +26,9 @@ async def search_soperacion_sedetalle(autoincrement, name, serie):
         
         print('funcit')                   
         with pyodbc.connect("DSN=A2GKC") as connection:#print(auto, row) 
-            cursor = connection.cursor()
-            cursor.execute(f""" SELECT 
+            try:
+                cursor = connection.cursor()
+                cursor.execute(f""" SELECT 
                                           FTI_AUTOINCREMENT AS AUTO,
                                           CAST(FTI_SERIE AS VARCHAR(12)) AS SERIE, 
                                           CAST(FTI_DOCUMENTO AS VARCHAR(10)) AS DOCUMENTO,
@@ -52,17 +54,21 @@ async def search_soperacion_sedetalle(autoincrement, name, serie):
                                     INTO "{pathlib.Path().absolute()}\\tmp\\SoperacionINV{name}"
                                     FROM SOPERACIONINV
                                     WHERE FTI_AUTOINCREMENT = {autoincrement}""")
-            cursor.execute(f"""SELECT
+                cursor.execute(f"""SELECT
                                     FDI_OPERACION_AUTOINCREMENT AS AUTOINC,
                                     FDI_CODIGO, 
                                     FDI_CANTIDAD,
                                     FDI_CANTIDAD * FDI_PRECIODEVENTA * (1-(FDI_PORCENTDESCUENTO1/100)) * (1-(FDI_PORCENTDESCUENTO2/100)) AS FDI_PRECIODEVENTA,
                                     FDI_CANTIDAD * FDI_PRECIOCONDESCUENTO * (1-(FDI_PORCENTDESCUENTO1/100)) * (1-(FDI_PORCENTDESCUENTO2/100)) AS FDI_PRECIOCONDESCUENTO
                                 INTO "{pathlib.Path().absolute()}\\tmp\\SDetalleventa{name}"     
-                                FROM SDETALLEVENTA
+                                FROM SDETALLEVENTAs
                                 INNER JOIN SOPERACIONINV ON FDI_OPERACION_AUTOINCREMENT = FTI_AUTOINCREMENT
                                 WHERE FDI_OPERACION_AUTOINCREMENT = {autoincrement}""")
-            cursor.close()
+                cursor.close()
+            except Exception as e:
+                 print(e)
+                 await updateAuto(str(autoincrement), serie.upper(), 'LASTAUTO')
+                 return (False, 0)    
         encode = await send_Data(name)
         await updateAuto(str(autoincrement), serie.upper(), 'LASTAUTO')
         return True, serie, encode
